@@ -15,6 +15,7 @@
 #include "GC/TinierSecret.h"
 #include "GC/MaliciousCcdSecret.h"
 #include "GC/TinyMC.h"
+#include "Protocols/ProtocolSet.h"
 
 #include "GC/TinierSharePrep.hpp"
 #include "GC/CcdSecret.h"
@@ -31,11 +32,14 @@ public:
 };
 
 template<template<class U> class T>
-void preprocessing(vector<EcTuple<T>>& tuples, int buffer_size,
+void preprocessing(ProtocolSet<T<P256Element::Scalar>> protocolSet,
+        vector<EcTuple<T>>& tuples,
+        int buffer_size,
         T<P256Element::Scalar>& sk,
-        SubProcessor<T<P256Element::Scalar>>& proc,
         EcdsaOptions opts)
 {
+    SubProcessor<T<P256Element::Scalar>> proc = protocolSet.processor;
+
     bool prep_mul = opts.prep_mul;
     Timer timer;
     timer.start();
