@@ -362,6 +362,7 @@ inline void Preprocessing<T>::get_three(Dtype dtype, T& a, T& b, T& c)
   get_three_no_count(dtype, a, b, c);
 }
 
+// get_two(Dtype, share a, share b)
 template<class T>
 inline void Preprocessing<T>::get_two(Dtype dtype, T& a, T& b)
 {
@@ -376,6 +377,7 @@ inline void Preprocessing<T>::get_one(Dtype dtype, T& a)
   get_one_no_count(dtype, a);
 }
 
+// get_input(share, share::open_type, player)
 template<class T>
 inline void Preprocessing<T>::get_input(T& a, typename T::open_type& x, int i)
 {

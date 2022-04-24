@@ -25,6 +25,7 @@
 #include "GC/VectorProtocol.hpp"
 #include "GC/CcdPrep.hpp"
 #include "Tools/Bundle.h"
+#include "Protocols/MascotEcPrep.hpp"
 
 #include <assert.h>
 
@@ -198,11 +199,12 @@ void run(int argc, const char** argv)
 
     typename ecShare::MAC_Check ec_output(ec_mac_key);
 
-    // typename ecShare::LivePrep ec_preprocessing(0, usage);
-    
+    // MascotEcPrep<ecShare, scalarShare> ec_preprocessing(usage);
+
     // SubProcessor<ecShare> ec_processor(ec_output, ec_preprocessing, P);
 
     InputEc<ecShare, scalarShare> ec_input(ec_output, preprocessing, P);
+    // Input<ecShare> ec_input(ec_output, ec_preprocessing, P);
 
     // Input Shares
     vector<ecShare> ec_inputs_shares[2];
