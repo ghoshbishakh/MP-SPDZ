@@ -134,19 +134,17 @@ void InputEc<T, V>::add_mine(const ec_open_type& input, int n_bits)
     (void) n_bits;
     int player = P.my_num();
 
-    ec_shares[player].push_back({});
-    T& ec_share = ec_shares[player].back();
-
     scalar_shares[player].push_back({});
     V& scalar_share = scalar_shares[player].back();
-
     prep.get_input(scalar_share, rr, player);
-
-    scalar_share += V::constant(rr, player, MC.get_alphai());
 
     t = input - ec_open_type(rr);
     t.pack(this->os[player]);
-    ec_share += T::constant(t, player, MC.get_alphai());
+
+    scalar_share += V::constant(rr, player, MC.get_alphai());
+
+    ec_shares[player].push_back(scalar_share);
+
     this->values_input++;
 }
 
@@ -167,13 +165,7 @@ void InputEc<T, V>::add_other(int player, int)
     scalar_shares.at(player).push_back({});
     prep.get_input(scalar_shares[player].back(), t, player);
 
-    ec_shares[player].push_back({});
-    T& ec_share = ec_shares[player].back();
-    
-    V& scalar_share = scalar_shares[player].back();
-    ec_open_type ecpoint(scalar_share.get_share());
-    ec_share.set_share(ecpoint);
-
+    ec_shares[player].push_back(scalar_shares[player].back());
 }
 
 
