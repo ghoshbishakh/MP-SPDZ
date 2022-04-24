@@ -12,10 +12,20 @@
 
 template<class T, class V>
 MascotEcPrep<T, V>::MascotEcPrep(DataPositions& usage):
-BufferPrep<T>(usage)
+Preprocessing<T>(usage),
+scalar_preprocessing(0, usage)
 {
-scalar_preprocessing(0, usage);
 }
+
+template<class T, class V>
+void MascotEcPrep<T, V>::get_input_no_count(T& a, typename T::open_type& x, int i){
+    V scalar_share;
+    typename V::open_type scalar_value;
+    scalar_preprocessing.get_input_no_count(scalar_share, scalar_value, i);
+    a = scalar_share;
+    x = scalar_value;
+}
+
 
 
 

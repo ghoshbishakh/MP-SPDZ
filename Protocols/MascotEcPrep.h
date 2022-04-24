@@ -15,14 +15,15 @@
 
 // T is Share<P256Element>, V is Share<gfp>
 template<class T, class V>
-class MascotEcPrep :public BufferPrep<T>
+class MascotEcPrep :public Preprocessing<T>
 {
 
-typedef MascotFieldPrep<V> scalar_preprocessing;
+MascotFieldPrep<V> scalar_preprocessing;
 
 public:
     MascotEcPrep<T, V>(DataPositions& usage);
 
+    void get_input_no_count(T& a, typename T::open_type& x, int i);
 };
 
 
