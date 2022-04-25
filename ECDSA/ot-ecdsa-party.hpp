@@ -199,7 +199,7 @@ void run(int argc, const char** argv)
 
     typename ecShare::MAC_Check ec_output(ec_mac_key);
 
-    MascotEcPrep<ecShare, scalarShare> ec_preprocessing(usage);
+    MascotEcPrep<ecShare, scalarShare> ec_preprocessing(usage, preprocessing);
 
     // SubProcessor<ecShare> ec_processor(ec_output, ec_preprocessing, P);
 
@@ -238,7 +238,7 @@ void run(int argc, const char** argv)
     ec_result = ec_output.finalize_open();
     cout << "-->" << pciinputs[0].Pk << endl;
     cout << "-->" << ec_result << endl;
-    ec_output.Check(processor.P);
+    ec_output.Check(P);
 
 
 

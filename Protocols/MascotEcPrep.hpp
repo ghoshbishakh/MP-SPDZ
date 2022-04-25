@@ -11,9 +11,9 @@
 
 
 template<class T, class V>
-MascotEcPrep<T, V>::MascotEcPrep(DataPositions& usage):
+MascotEcPrep<T, V>::MascotEcPrep(DataPositions& usage, MascotFieldPrep<V>& scalar_preprocessing):
 Preprocessing<T>(usage),
-scalar_preprocessing(0, usage)
+scalar_preprocessing(scalar_preprocessing)
 {
 }
 
