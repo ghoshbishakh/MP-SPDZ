@@ -8,6 +8,7 @@
 
 #include "ReplicatedPrep.h"
 #include "OT/MascotParams.h"
+#include "Protocols/Share.h"
 
 template<class T>
 class OTPrep : public virtual BitPrep<T>
@@ -126,5 +127,7 @@ public:
     {
     }
 };
+
+
 
 #endif /* PROTOCOLS_MASCOTPREP_H_ */
