@@ -13,8 +13,10 @@
 #include "ECDSA/preprocessing.hpp"
 #include "ECDSA/sign.hpp"
 #include "Protocols/Beaver.hpp"
+#include "Protocols/EcBeaver.hpp"
 #include "Protocols/fake-stuff.hpp"
 #include "Protocols/MascotPrep.hpp"
+#include "Protocols/MascotEcPrep.hpp"
 #include "Processor/Processor.hpp"
 #include "Processor/Data_Files.hpp"
 #include "Processor/Input.hpp"
@@ -23,6 +25,26 @@
 #include "GC/CcdPrep.hpp"
 
 #include <assert.h>
+
+class PCIInput
+{
+public:
+    P256Element::Scalar sk;
+    P256Element Pk;
+    EcSignature signature;
+};
+
+// Function for Scalar multiplication of A p256 share and a clear gfp
+void ecscalarmulshare(Share<P256Element> pointshare, P256Element::Scalar multiplier, Share<P256Element>& result){
+    result.set_share(pointshare.get_share() * multiplier);
+    result.set_mac(pointshare.get_mac() * multiplier);
+}
+
+// Function for Scalar multiplication of a clear p256 and a shared gfp
+void ecscalarmulshare(P256Element point, Share<P256Element::Scalar> multiplierShare, Share<P256Element>& result){
+    result.set_share(point * multiplierShare.get_share());
+    result.set_mac(point * multiplierShare.get_mac());
+}
 
 template<template<class U> class T>
 void run(int argc, const char** argv)
@@ -84,57 +106,212 @@ void run(int argc, const char** argv)
             "--no-macs" // Flag token.
     );
 
+    // Setup network with two players
     Names N(opt, argc, argv, 2);
-    int n_tuples = 1000;
-    if (not opt.lastArgs.empty())
-        n_tuples = atoi(opt.lastArgs[0]->c_str());
-    PlainPlayer P(N, "ecdsa");
-    P256Element::init();
-    P256Element::Scalar::next::init_field(P256Element::Scalar::pr(), false);
 
+    // Setup PlainPlayer
+    PlainPlayer P(N, "ecdsa");
+    
+    // Initialize curve and field
+    // Initializes the field order to same as curve order 
+    P256Element::init();
+    // Initialize scalar:next with same order as field order. ??
+    P256Element::Scalar::next::init_field(P256Element::Scalar::pr(), false);
+    
     BaseMachine machine;
     machine.ot_setups.push_back({P, true});
 
-    P256Element::Scalar keyp;
+    
+    // Generate secret keys and signatures with them
+    cout << "generating random keys and signatures" << endl;
+    vector<PCIInput> pciinputs;
+    P256Element::Scalar sk;
+
     SeededPRNG G;
-    keyp.randomize(G);
+    int INPUTSIZE = 3;
+    unsigned char* message = (unsigned char*)"this is a sample claim"; // 22
+    
+    for (int i = 0; i < INPUTSIZE; i++)
+    {
+        // chose random sk
+        sk.randomize(G);
 
-    typedef T<P256Element::Scalar> pShare;
-    DataPositions usage;
+        // create pk
+        P256Element Pk(sk);
 
-    OnlineOptions::singleton.batch_size = 1;
-    typename pShare::Direct_MC MCp(keyp);
-    ArithmeticProcessor _({}, 0);
-    typename pShare::TriplePrep sk_prep(0, usage);
-    SubProcessor<pShare> sk_proc(_, MCp, sk_prep, P);
-    pShare sk, __;
-    // synchronize
-    Bundle<octetStream> bundle(P);
-    P.unchecked_broadcast(bundle);
-    Timer timer;
-    timer.start();
-    auto stats = P.total_comm();
-    sk_prep.get_two(DATA_INVERSE, sk, __);
-    cout << "Secret key generation took " << timer.elapsed() * 1e3 << " ms" << endl;
-    (P.total_comm() - stats).print(true);
+        // sign
+        EcSignature signature = sign(message, 22, sk);
+        check(signature, message, 22, Pk);
+ 
+        pciinputs.push_back({sk, Pk, signature});
+    }
 
-    OnlineOptions::singleton.batch_size = (1 + pShare::Protocol::uses_triples) * n_tuples;
-    typename pShare::TriplePrep prep(0, usage);
-    prep.params.correlation_check &= not opt.isSet("-U");
-    prep.params.fewer_rounds = opt.isSet("-A");
-    prep.params.fiat_shamir = opt.isSet("-H");
-    prep.params.check = not opt.isSet("-E");
-    prep.params.generateMACs = not opt.isSet("-M");
-    opts.check_beaver_open &= prep.params.generateMACs;
-    opts.check_open &= prep.params.generateMACs;
-    SubProcessor<pShare> proc(_, MCp, prep, P);
-    typename pShare::prep_type::Direct_MC MCpp(keyp);
-    prep.triple_generator->MC = &MCpp;
 
-    bool prep_mul = not opt.isSet("-D");
-    prep.params.use_extension = not opt.isSet("-S");
-    vector<EcTuple<T>> tuples;
-    preprocessing(tuples, n_tuples, sk, proc, opts);
-    //check(tuples, sk, keyp, P);
-    sign_benchmark(tuples, sk, MCp, P, opts, prep_mul ? 0 : &proc);
+    DataPositions usage(P.num_players());
+
+    typedef T<P256Element::Scalar> scalarShare;
+
+    typename scalarShare::mac_key_type mac_key;
+    scalarShare::read_or_generate_mac_key("", P, mac_key);
+
+    typename scalarShare::Direct_MC output(mac_key);
+
+    typename scalarShare::LivePrep preprocessing(0, usage);
+    
+    SubProcessor<scalarShare> processor(output, preprocessing, P);
+
+    typename scalarShare::Input input(output, preprocessing, P);
+
+
+    // Input Shares
+    int thisplayer = N.my_num();
+    vector<scalarShare> inputs_shares[2];
+
+
+    // Give Input
+    // typename scalarShare::Input input = protocolSet.input;
+
+    input.reset_all(P);
+    for (int i = 0; i < INPUTSIZE; i++)
+        input.add_from_all(pciinputs[i].sk);
+    input.exchange();
+    for (int i = 0; i < INPUTSIZE; i++)
+    {
+        // shares of party A
+        inputs_shares[0].push_back(input.finalize(0));
+
+        // shares of party B
+        inputs_shares[1].push_back(input.finalize(1));
+    }
+    cout << "---- inputs shared ----" << thisplayer << endl;
+
+    // output
+    typename scalarShare::clear result;
+    // auto& output = protocolSet.output;
+    output.init_open(P);
+    output.prepare_open(inputs_shares[0][0]);
+    output.exchange(P);
+    result = output.finalize_open();
+    cout << "-->" << pciinputs[0].sk << endl;
+    cout << "-->" << result << endl;
+    output.Check(processor.P);
+
+    // ------------------------------------------------------
+
+    typedef T<P256Element> ecShare;
+
+    typename ecShare::mac_key_type ec_mac_key;
+    ecShare::read_or_generate_mac_key("", P, ec_mac_key);
+
+
+    typename ecShare::Direct_MC ec_output(output.get_alphai());
+    
+    MascotEcPrep<ecShare, scalarShare> ec_preprocessing(usage, preprocessing);
+
+    // SubProcessor<ecShare> ec_processor(ec_output, ec_preprocessing, P);
+
+    typename ecShare::Input ec_input(ec_output, ec_preprocessing, P);
+
+
+    // Input Shares
+    vector<ecShare> ec_inputs_shares[2];
+
+
+    // Give Input
+    // typename ecShare::Input input = protocolSet.input;
+
+    ec_input.reset_all(P);
+    for (int i = 0; i < INPUTSIZE; i++)
+        ec_input.add_from_all(pciinputs[i].Pk);
+    ec_input.exchange();
+    for (int i = 0; i < INPUTSIZE; i++)
+    {
+        // shares of party A
+        ec_inputs_shares[0].push_back(ec_input.finalize(0));
+
+        // shares of party B
+        ec_inputs_shares[1].push_back(ec_input.finalize(1));
+    }
+    cout << "---- ec inputs shared ----" << thisplayer << endl;
+
+    // output
+    typename ecShare::clear ec_result;
+    ec_output.init_open(P);
+    ec_output.prepare_open(ec_inputs_shares[0][0]);
+    ec_output.exchange(P);
+    ec_result = ec_output.finalize_open();
+    cout << "-->" << pciinputs[0].Pk << endl;
+    cout << "-->" << ec_result << endl;
+    ec_output.Check(P);
+
+    cout << "---- Add-G ----" << thisplayer << endl;
+    // Multiply open scalar- result with private point ec_inputs_shares[0][1]
+
+    if (P.my_num() == 0){
+        cout << "Expected result of Add-G: " << pciinputs[1].Pk + pciinputs[1].Pk << endl;
+    }
+
+    ecShare addgs = ec_inputs_shares[0][1] + ec_inputs_shares[0][1];
+    ec_output.init_open(P);
+    ec_output.prepare_open(addgs);
+    ec_output.exchange(P);
+    ec_result = ec_output.finalize_open();
+    cout << "-->" << ec_result << endl;
+    ec_output.Check(P);
+
+    cout << "---- Multiply-G-P ----" << thisplayer << endl;
+    if (P.my_num() == 0){
+        cout << "Expected result of Multiply-G-P: " << pciinputs[1].Pk * result << endl;
+    }
+
+    ecShare mulgp = {};
+    ecscalarmulshare(ec_inputs_shares[0][1], result, mulgp);
+    ec_output.init_open(P);
+    ec_output.prepare_open(mulgp);
+    ec_output.exchange(P);
+    ec_result = ec_output.finalize_open();
+    cout << "-->" << ec_result << endl;
+    ec_output.Check(P);
+
+    cout << "---- Multiply-G-P-dash [<x>]P ----" << thisplayer << endl;
+    if (P.my_num() == 0){
+        cout << "Expected result of Multiply-G-P: " << ec_result * pciinputs[1].sk << endl;
+    }
+
+    ecShare mulgp2 = {};
+    ecscalarmulshare(ec_result, inputs_shares[0][1], mulgp2);
+    ec_output.init_open(P);
+    ec_output.prepare_open(mulgp2);
+    ec_output.exchange(P);
+    ec_result = ec_output.finalize_open();
+    cout << "-->" << ec_result << endl;
+    ec_output.Check(P);
+
+    // EcBeaver<ecShare, scalarShare> ecprotocol(P);
+
+
+    cout << "---- Multiply-G-S ----" << thisplayer << endl;
+    if (P.my_num() == 0){
+        cout << "Expected result of Multiply-G-S: " << pciinputs[1].Pk * pciinputs[1].sk << endl;
+    }
+
+    EcBeaver<ecShare, scalarShare> ecprotocol(P);
+    ecprotocol.init(preprocessing, ec_output, output);
+    ecprotocol.init_mul();
+    ecprotocol.prepare_scalar_mul(inputs_shares[0][1], ec_inputs_shares[0][1]);
+    ecprotocol.exchange();
+    ecShare ec_result_share = ecprotocol.finalize_mul();
+    
+    ec_output.init_open(P);
+    ec_output.prepare_open(ec_result_share);
+    ec_output.exchange(P);
+    ec_result = ec_output.finalize_open();
+    cout << "-->" << ec_result << endl;
+    ec_output.Check(P);
+
+
+
+
+    cout << "=====================" << endl;
+    
 }
