@@ -21,6 +21,7 @@
 #include "GC/TinyPrep.hpp"
 #include "GC/VectorProtocol.hpp"
 #include "GC/CcdPrep.hpp"
+#include "Protocols/ProtocolSet.h"
 
 #include <assert.h>
 
@@ -84,14 +85,19 @@ void run(int argc, const char** argv)
             "--no-macs" // Flag token.
     );
 
+    // set up networking
     Names N(opt, argc, argv, 2);
     int n_tuples = 1000;
     if (not opt.lastArgs.empty())
         n_tuples = atoi(opt.lastArgs[0]->c_str());
     PlainPlayer P(N, "ecdsa");
+
+    // Configure the curve and the field
     P256Element::init();
     P256Element::Scalar::next::init_field(P256Element::Scalar::pr(), false);
+    int prime_length = P256Element::Scalar::length();
 
+    // Do we need these?
     BaseMachine machine;
     machine.ot_setups.push_back({P, true});
 
@@ -100,13 +106,20 @@ void run(int argc, const char** argv)
     keyp.randomize(G);
 
     typedef T<P256Element::Scalar> pShare;
-    DataPositions usage;
+
+    // DataPositions usage;
+
+    // Protocol Set
+    ProtocolSetup<pShare> protocolSetup(P, prime_length);
+    ProtocolSet<pShare> protocolSet(P, protocolSetup);
 
     OnlineOptions::singleton.batch_size = 1;
-    typename pShare::Direct_MC MCp(keyp);
-    ArithmeticProcessor _({}, 0);
-    typename pShare::TriplePrep sk_prep(0, usage);
-    SubProcessor<pShare> sk_proc(_, MCp, sk_prep, P);
+
+
+    // typename pShare::Direct_MC MCp(keyp);
+    // ArithmeticProcessor _({}, 0);
+    // typename pShare::TriplePrep sk_prep(0, usage);
+    // SubProcessor<pShare> sk_proc(_, MCp, sk_prep, P);
     pShare sk, __;
     // synchronize
     Bundle<octetStream> bundle(P);
@@ -114,27 +127,29 @@ void run(int argc, const char** argv)
     Timer timer;
     timer.start();
     auto stats = P.total_comm();
-    sk_prep.get_two(DATA_INVERSE, sk, __);
+    // sk_prep.get_two(DATA_INVERSE, sk, __);
+    protocolSet.preprocessing.get_two(DATA_INVERSE, sk, __);
     cout << "Secret key generation took " << timer.elapsed() * 1e3 << " ms" << endl;
     (P.total_comm() - stats).print(true);
 
     OnlineOptions::singleton.batch_size = (1 + pShare::Protocol::uses_triples) * n_tuples;
-    typename pShare::TriplePrep prep(0, usage);
-    prep.params.correlation_check &= not opt.isSet("-U");
-    prep.params.fewer_rounds = opt.isSet("-A");
-    prep.params.fiat_shamir = opt.isSet("-H");
-    prep.params.check = not opt.isSet("-E");
-    prep.params.generateMACs = not opt.isSet("-M");
-    opts.check_beaver_open &= prep.params.generateMACs;
-    opts.check_open &= prep.params.generateMACs;
-    SubProcessor<pShare> proc(_, MCp, prep, P);
-    typename pShare::prep_type::Direct_MC MCpp(keyp);
-    prep.triple_generator->MC = &MCpp;
+    // typename pShare::TriplePrep prep(0, usage);
+    protocolSet.preprocessing.params.correlation_check &= not opt.isSet("-U");
+    protocolSet.preprocessing.params.fewer_rounds = opt.isSet("-A");
+    protocolSet.preprocessing.params.fiat_shamir = opt.isSet("-H");
+    protocolSet.preprocessing.params.check = not opt.isSet("-E");
+    protocolSet.preprocessing.params.generateMACs = not opt.isSet("-M");
+    opts.check_beaver_open &= protocolSet.preprocessing.params.generateMACs;
+    opts.check_open &= protocolSet.preprocessing.params.generateMACs;
+    // SubProcessor<pShare> proc(_, MCp, prep, P);
+    // typename pShare::prep_type::Direct_MC MCpp(keyp);
+    // protocolSet.preprocessing.triple_generator->MC = &MCpp;
 
-    bool prep_mul = not opt.isSet("-D");
-    prep.params.use_extension = not opt.isSet("-S");
+    // bool prep_mul = not opt.isSet("-D");
+    protocolSet.preprocessing.params.use_extension = not opt.isSet("-S");
     vector<EcTuple<T>> tuples;
-    preprocessing(tuples, n_tuples, sk, proc, opts);
-    //check(tuples, sk, keyp, P);
-    sign_benchmark(tuples, sk, MCp, P, opts, prep_mul ? 0 : &proc);
+    cout << "---------- Start preprocessing ------------" << endl;
+    preprocessing(protocolSet, tuples, n_tuples, sk, opts);
+    // //check(tuples, sk, keyp, P);
+    // sign_benchmark(tuples, sk, MCp, P, opts, prep_mul ? 0 : &proc);
 }
